@@ -1,22 +1,88 @@
-import { View, Text, StyleSheet, FlatList, TextInput, Pressable, Image } from 'react-native';
-import { useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TextInput, Pressable, Image, Alert, ActivityIndicator, RefreshControl } from 'react-native';
+import { useState, useEffect } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
-
-const initialTasks = [
-  { id: '1', text: 'To check email', done: true },
-  { id: '2', text: 'UI task web page', done: false },
-  { id: '3', text: 'Learn javascript basic', done: false },
-  { id: '4', text: 'Learn HTML Advance', done: false },
-  { id: '5', text: 'Medical App UI', done: false },
-  { id: '6', text: 'Learn Java', done: false },
-];
+import { TodoService, Todo } from '../services/api';
 
 export default function TasksScreen() {
   const { name } = useLocalSearchParams();
-  const [tasks, setTasks] = useState(initialTasks);
+  const [todos, setTodos] = useState<Todo[]>([]);
   const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const filteredTasks = tasks.filter(t => t.text.toLowerCase().includes(search.toLowerCase()));
+  // Load todos từ API
+  const loadTodos = async () => {
+    try {
+      setLoading(true);
+      const data = await TodoService.getAllTodos();
+      setTodos(data);
+    } catch (error) {
+      Alert.alert('Lỗi', 'Không thể tải danh sách công việc');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Refresh todos
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadTodos();
+    setRefreshing(false);
+  };
+
+  // Xóa todo
+  const deleteTodo = async (id: string) => {
+    Alert.alert(
+      'Xác nhận xóa',
+      'Bạn có chắc chắn muốn xóa công việc này?',
+      [
+        { text: 'Hủy', style: 'cancel' },
+        {
+          text: 'Xóa',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await TodoService.deleteTodo(id);
+              setTodos(todos.filter(todo => todo.id !== id));
+            } catch (error) {
+              Alert.alert('Lỗi', 'Không thể xóa công việc');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Chỉnh sửa todo
+  const editTodo = (todo: Todo) => {
+    router.push({
+      pathname: '/add-job',
+      params: { 
+        id: todo.id, 
+        title: todo.title, 
+        body: todo.body,
+        isEdit: 'true'
+      }
+    });
+  };
+
+  useEffect(() => {
+    loadTodos();
+  }, []);
+
+  const filteredTodos = todos.filter(todo => 
+    todo.title.toLowerCase().includes(search.toLowerCase()) ||
+    todo.body.toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color="#1CC8EE" />
+        <Text style={styles.loadingText}>Đang tải...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -38,25 +104,46 @@ export default function TasksScreen() {
         onChangeText={setSearch}
       />
       <FlatList
-        data={filteredTasks}
+        data={filteredTodos}
         keyExtractor={item => item.id}
         renderItem={({ item }) => (
           <View style={styles.taskRow}>
-            <View style={[styles.checkBox, item.done && styles.checked]} />
-            <Text style={styles.taskText}>{item.text}</Text>
-            <Pressable style={styles.editBtn} onPress={() => {}}>
-              <Text style={{ color: '#E57373', fontSize: 18 }}>✏️</Text>
-            </Pressable>
-            <Pressable style={styles.deleteBtn} onPress={() => setTasks(tasks.filter(t => t.id !== item.id))}>
-              <Text style={{ color: '#fff', fontWeight: 'bold' }}>—</Text>
-            </Pressable>
+            <View style={styles.taskContent}>
+              <Text style={styles.taskTitle}>{item.title}</Text>
+              {item.body && <Text style={styles.taskBody}>{item.body}</Text>}
+              {item.createdAt && (
+                <Text style={styles.taskDate}>
+                  {new Date(item.createdAt).toLocaleDateString('vi-VN')}
+                </Text>
+              )}
+            </View>
+            <View style={styles.actionButtons}>
+              <Pressable style={styles.editBtn} onPress={() => editTodo(item)}>
+                <Text style={{ color: '#1CC8EE', fontSize: 18 }}>✏️</Text>
+              </Pressable>
+              <Pressable style={styles.deleteBtn} onPress={() => deleteTodo(item.id)}>
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>🗑️</Text>
+              </Pressable>
+            </View>
           </View>
         )}
         style={{ width: '100%' }}
         contentContainerStyle={{ paddingBottom: 80 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>Không có công việc nào</Text>
+            <Text style={styles.emptySubText}>Thêm công việc mới bằng nút + bên dưới</Text>
+          </View>
+        }
       />
       <Pressable style={styles.fab} onPress={() => router.push('/add-job')}>
         <Text style={styles.fabText}>＋</Text>
+      </Pressable>
+      <Pressable style={styles.aboutButton} onPress={() => router.push('/about')}>
+        <Text style={styles.aboutButtonText}>ℹ️</Text>
       </Pressable>
     </View>
   );
@@ -102,42 +189,52 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 16,
     marginBottom: 12,
-    padding: 12,
+    padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 1,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    borderLeftWidth: 4,
+    borderLeftColor: '#1CC8EE',
   },
-  checkBox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#1CC8EE',
-    marginRight: 12,
-    backgroundColor: '#fff',
-  },
-  checked: {
-    backgroundColor: '#1CC8EE',
-    borderColor: '#1CC8EE',
-  },
-  taskText: {
+  taskContent: {
     flex: 1,
+    marginRight: 12,
+  },
+  taskTitle: {
     fontSize: 16,
+    fontWeight: 'bold',
     color: '#222',
+    marginBottom: 4,
+  },
+  taskBody: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  taskDate: {
+    fontSize: 12,
+    color: '#999',
+    fontStyle: 'italic',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   editBtn: {
-    marginHorizontal: 8,
+    marginRight: 8,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#f0f9ff',
   },
   deleteBtn: {
-    backgroundColor: '#E57373',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-    marginLeft: 4,
+    backgroundColor: '#ff4757',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   fab: {
     position: 'absolute',
@@ -179,5 +276,50 @@ const styles = StyleSheet.create({
     color: '#25292e',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#999',
+    marginBottom: 8,
+  },
+  emptySubText: {
+    fontSize: 14,
+    color: '#ccc',
+    textAlign: 'center',
+  },
+  aboutButton: {
+    position: 'absolute',
+    bottom: 32,
+    right: 24,
+    backgroundColor: '#1CC8EE',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  aboutButtonText: {
+    fontSize: 20,
+    color: '#fff',
   },
 });
